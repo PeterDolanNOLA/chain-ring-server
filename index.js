@@ -1,4 +1,4 @@
-
+require('dotenv').config();
 /* eslint-disable no-plusplus */
 /* eslint-disable max-len */
 const turf = require('@turf/turf');
@@ -7,7 +7,6 @@ const express = require('express');
 const axios = require('axios');
 const polyline = require('google-polyline');
 const PathFinder = require('geojson-path-finder');
-const { point } = require('@turf/helpers');
 
 const geojsonPick = require('geojson-pick');
 const geojson = require('./db/Bike_Lanes.json');
@@ -21,6 +20,7 @@ testCoords.forEach((coord) => {
 });
 const testCoordsPath = turf.points(geoParse);
 
+console.log(process.env.API_KEY);
 pathPoints.features.concat(testCoordsPath.features);
 const lineStrings = [];
 // console.log(newGeoJson.features[0].geometry);
@@ -121,13 +121,13 @@ app.get('/mapPolyline', (req, res) => {
   // safePath.path.unshift(userLoc);
   // safePath.path.push(place);
   // let encodedSafePath = polyline.encode(safePath);
-  console.log('Path:');
+
   if (!wayPoint) {
     let safePolyline;
-    axios.get(`https://maps.googleapis.com/maps/api/directions/json?origin=${userLoc}&destination=${place}&key=AIzaSyAm0rv3w8tQUIPbjDkQyGhQUsK5rAxfBUs&mode=bicycling`)
+    axios.get(`https://maps.googleapis.com/maps/api/directions/json?origin=${userLoc}&destination=${place}&key=${process.env.API_KEY}&mode=bicycling`)
       .then((response) => {
         // console.log(response.data);
-        const wayPointArr = [];
+        let wayPointArr = safePath.path;
         const polyLine = response.data.routes[0].overview_polyline.points;
         const turnByTurn = response.data.routes[0].legs[0].steps.map(step => [`${step.html_instructions.replace(/<b>/g, '').replace(/<\/b>/g, '').replace(/<div style="font-size:0.9em">/g, ' ').replace(/<\/div>/g, '')}`, `for ${step.distance.text}/${step.duration.text}`]);
         const peterRide = response.data.routes[0].legs[0].steps;
@@ -140,20 +140,55 @@ app.get('/mapPolyline', (req, res) => {
             waypointStr += `${safePath.path[i * divider]}|`;
           }
           const waypointCall = `${safePath.path[0]}|${waypointStr}${safePath.path[safePath.path.length - 1]}`;
-          console.log('waypointcall', waypointCall);
-          axios.get(`https://maps.googleapis.com/maps/api/directions/json?origin=${userLoc}&destination=${place}&key=AIzaSyAm0rv3w8tQUIPbjDkQyGhQUsK5rAxfBUs&mode=bicycling&waypoints=${waypointCall}`)
+
+          axios.get(`https://maps.googleapis.com/maps/api/directions/json?origin=${userLoc}&destination=${place}&key=${process.env.API_KEY}&mode=bicycling&waypoints=${waypointCall}`)
             .then((safeResponse) => {
               safePolyline = safeResponse.data.routes[0].overview_polyline.points;
+              const safePathArr = polyline.decode(safePolyline);
+
+
+              // const startLatNum = Number(startInNetwork.geometry.coordinates[0].toFixed(5));
+              // const startLngNum = Number(startInNetwork.geometry.coordinates[1].toFixed(5));
+              // const startCoord = [startLatNum, startLngNum];
+              // const endLatNum = Number(endInNetwork.geometry.coordinates[0].toFixed(5));
+              // const endLngNum = Number(endInNetwork.geometry.coordinates[1].toFixed(5));
+              // const endCoord = [endLatNum, endLngNum];
+              let startIndex;
+              let endIndex;
+              let smallestStartDist = 100;
+              let smallestEndDist = 100;
+
+
+              safePathArr.forEach((coord, i) => {
+                const coordPoint = turf.point(coord);
+
+                if (turf.distance(start, coordPoint) < smallestStartDist) {
+                  smallestStartDist = turf.distance(start, coordPoint);
+                  startIndex = i;
+                }
+                if (turf.distance(end, coordPoint) < smallestEndDist) {
+                  smallestEndDist = turf.distance(end, coordPoint);
+                  endIndex = i;
+                }
+              });
+
+              const startConnect = safePathArr.slice(1, startIndex);
+              const endConnect = safePathArr.slice(endIndex);
+
+              wayPointArr = startConnect.concat(wayPointArr).concat(endConnect);
+              console.log(wayPointArr);
+
+              //  safePolyline = polyline.encode(wayPointArr);
               const safeTurnByTurn = [];
               const safeRide = [];
-              // console.log(Array.isArray(safeResponse.data.routes[0].legs));
+
               safeResponse.data.routes[0].legs.forEach((leg) => {
                 const instruction = leg.steps.map(step => [`${step.html_instructions.replace(/<b>/g, '').replace(/<\/b>/g, '').replace(/<div style="font-size:0.9em">/g, ' ').replace(/<\/div>/g, '')}`, `for ${step.distance.text}/${step.duration.text}`]);
                 safeTurnByTurn.push(instruction);
                 safeRide.push(leg.steps);
               });
 
-              console.log(safeRide);
+
               res.send({
                 polyLine, turnByTurn, peterRide, safePath, wayPointArr, safePolyline, safeTurnByTurn, safeRide,
               });
